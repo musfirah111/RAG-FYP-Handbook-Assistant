@@ -1,175 +1,142 @@
-# ingest.py
-"""
-Assignment Part Covered:
-1. Load & chunk (with page numbers)
-2. Embed & index
-"""
-
 import os
 import pickle
+import logging
+import numpy as np
+import pytesseract
 from PyPDF2 import PdfReader
+from pdf2image import convert_from_path
 from sentence_transformers import SentenceTransformer
 import faiss
-import numpy as np
-import logging
 from dotenv import load_dotenv
 from huggingface_hub import login
-import pytesseract
-from pdf2image import convert_from_path
-from PIL import Image
 
+# -------------------------------
+# INIT
+# -------------------------------
 load_dotenv()
+
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 hf_token = os.getenv("HUGGING_FACE_TOKEN")
-print("Token loaded: ", hf_token is not None)
-
-login(hf_token)
+if hf_token:
+    login(hf_token)
 
 # -------------------------------
 # CONFIG
 # -------------------------------
-PDF_PATH = "FYP-Handbook\\3. FYP-Handbook-2023.pdf"
-CHUNK_SIZE = 400
+PDF_PATH = r"FYP-Handbook\3. FYP-Handbook-2023.pdf"
+CHUNK_SIZE = 250          # FIXED (was too large)
 CHUNK_OVERLAP = 50
 EMBED_MODEL = "all-MiniLM-L6-v2"
+
 INDEX_FILE = "faiss_index.bin"
 META_FILE = "metadata.pkl"
 
 # -------------------------------
-# LOGGING SETUP
+# LOGGING
 # -------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="🔹 %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="🔹 %(message)s")
 
 # -------------------------------
-# STEP 1: LOAD PDF
+# LOAD PDF + OCR FALLBACK
 # -------------------------------
 def load_pdf(pdf_path):
-    logging.info("Loading PDF with OCR fallback...")
+    logging.info("Loading PDF + OCR fallback...")
 
     pages = []
-
-    # Convert PDF to images.
-    pdf_images = convert_from_path(pdf_path, dpi=300)
-
+    images = convert_from_path(pdf_path, dpi=300)
     reader = PdfReader(pdf_path)
 
     for i, page in enumerate(reader.pages):
         text = page.extract_text()
 
-        # If text is weak, use OCR.
         if not text or len(text.strip()) < 100:
-            # logging.info(f"Page {i+1} using OCR...")
+            text = pytesseract.image_to_string(images[i], config="--oem 3 --psm 6")
 
-            image = pdf_images[i]
-            text = pytesseract.image_to_string(image, config="--oem 3 --psm 6")
-
-        if text:
+        if text and text.strip():
             pages.append({
                 "page": i + 1,
-                "text": text
+                "text": text.strip()
             })
 
-            logging.info(f"Loaded page {i+1} | chars: {len(text)}")
-
-    logging.info(f"Total pages loaded: {len(pages)}")
+    logging.info(f"Pages loaded: {len(pages)}")
     return pages
 
 # -------------------------------
-# STEP 2: CHUNKING
+# CLEAN TEXT (IMPORTANT FIX)
+# -------------------------------
+def clean_text(text):
+    text = " ".join(text.split())
+    return text
+
+# -------------------------------
+# CHUNKING (FIXED VERSION)
 # -------------------------------
 def chunk_text(pages):
-    logging.info("Starting chunking process...")
-
-    # STEP 1: merge all text first
-    full_text = "\n".join([p["text"] for p in pages])
-
-    words = full_text.split()
+    logging.info("Chunking text properly...")
 
     chunks = []
 
-    for i in range(0, len(words), CHUNK_SIZE - CHUNK_OVERLAP):
-        chunk_words = words[i:i + CHUNK_SIZE]
+    for page in pages:
+        words = clean_text(page["text"]).split()
 
-        chunks.append({
-            "text": " ".join(chunk_words),
-            "page": "merged"
-        })
+        for i in range(0, len(words), CHUNK_SIZE - CHUNK_OVERLAP):
+            chunk = words[i:i + CHUNK_SIZE]
 
-    logging.info(f"Total chunks created: {len(chunks)}")
+            chunks.append({
+                "text": " ".join(chunk),
+                "page": page["page"]
+            })
 
-    logging.info("Printing ALL chunks...\n")
-
-    for idx, chunk in enumerate(chunks):
-        print("\n" + "=" * 50)
-        print(f"Chunk {idx + 1}")
-        print("=" * 50)
-        print(chunk["text"])
-
+    logging.info(f"Total chunks: {len(chunks)}")
     return chunks
 
 # -------------------------------
-# STEP 3: EMBEDDINGS
+# EMBEDDINGS
 # -------------------------------
 def create_embeddings(chunks, model):
-    logging.info("Loading embedding model...")
     texts = [c["text"] for c in chunks]
-
-    logging.info("Creating embeddings (this may take time)...")
     embeddings = model.encode(texts, show_progress_bar=True)
-
-    logging.info(f"Embeddings shape: {embeddings.shape}")
     return np.array(embeddings)
 
 # -------------------------------
-# STEP 4: BUILD FAISS INDEX
+# FAISS INDEX
 # -------------------------------
 def build_index(embeddings):
-    logging.info("Building FAISS index...")
-
     dim = embeddings.shape[1]
     index = faiss.IndexFlatIP(dim)
 
     faiss.normalize_L2(embeddings)
     index.add(embeddings)
 
-    logging.info(f"Index built with {index.ntotal} vectors")
     return index
 
 # -------------------------------
-# SAVE DATA
+# SAVE
 # -------------------------------
-def save_data(index, chunks):
-    logging.info("Saving index and metadata...")
-
+def save(index, chunks):
     faiss.write_index(index, INDEX_FILE)
 
     with open(META_FILE, "wb") as f:
         pickle.dump(chunks, f)
 
-    logging.info("Files saved successfully!")
-
 # -------------------------------
-# MAIN PIPELINE
+# MAIN
 # -------------------------------
 def main():
-    logging.info("Starting ingestion pipeline")
-
     pages = load_pdf(PDF_PATH)
+
     chunks = chunk_text(pages)
 
     model = SentenceTransformer(EMBED_MODEL)
 
     embeddings = create_embeddings(chunks, model)
+
     index = build_index(embeddings)
 
-    save_data(index, chunks)
+    save(index, chunks)
 
-    logging.info("INGESTION COMPLETE")
+    logging.info("DONE 🚀")
 
-# -------------------------------
 if __name__ == "__main__":
     main()
