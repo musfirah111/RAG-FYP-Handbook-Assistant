@@ -11,8 +11,17 @@ import ollama
 INDEX_FILE = "faiss_index.bin"
 META_FILE = "metadata.pkl"
 EMBED_MODEL = "all-MiniLM-L6-v2"
-TOP_K = 3
-SIM_THRESHOLD = 0.25
+TOP_K = 5
+SIM_THRESHOLD = 0.15
+
+# -------------------------------
+# PAGE CONFIG
+# -------------------------------
+st.set_page_config(
+    page_title="FYP Assistant",
+    page_icon="📘",
+    layout="wide"
+)
 
 # -------------------------------
 # LOAD SYSTEM
@@ -29,7 +38,7 @@ def load_system():
     return index, metadata, embed_model
 
 # -------------------------------
-# RETRIEVAL
+# RETRIEVAL (IMPROVED)
 # -------------------------------
 def retrieve(query, index, metadata, model):
     query_emb = model.encode([query])
@@ -39,27 +48,44 @@ def retrieve(query, index, metadata, model):
 
     results = []
     for score, idx in zip(scores[0], indices[0]):
+        text = metadata[idx]["text"]
+
+        # 🔥 keyword boost (fix for "font" vs "fonts")
+        keyword_bonus = 0
+        for word in query.lower().split():
+            if word in text.lower():
+                keyword_bonus += 0.05
+
         results.append({
-            "score": float(score),
-            "text": metadata[idx]["text"],
+            "score": float(score + keyword_bonus),
+            "text": text,
             "page": metadata[idx]["page"]
         })
+
+    # sort after boosting
+    results = sorted(results, key=lambda x: x["score"], reverse=True)
 
     return results
 
 # -------------------------------
-# PROMPT
+# PROMPT (STRONG)
 # -------------------------------
 def build_prompt(question, chunks):
     context = "\n\n".join([
-        f"(p.{c['page']}) {c['text'][:400]}"
+        f"(Page {c['page']}) {c['text']}"
         for c in chunks
     ])
 
     return f"""
-You are a strict FYP handbook assistant.
-Answer ONLY using the context.
-Always mention page numbers.
+You are a STRICT FYP handbook assistant.
+
+RULES:
+1. Answer ONLY from the context
+2. DO NOT guess
+3. If information exists → extract EXACT values
+4. ALWAYS include page numbers
+5. If multiple values exist → list clearly
+6. DO NOT say "not mentioned" if it exists
 
 Context:
 {context}
@@ -67,47 +93,65 @@ Context:
 Question:
 {question}
 
-Answer clearly:
+Give a precise, structured answer:
 """
 
 # -------------------------------
-# STREAMLIT UI
+# CHAT STATE
+# -------------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# -------------------------------
+# UI
 # -------------------------------
 def main():
-    st.title("🔥 LLaMA 3 RAG Assistant (Ollama)")
+    st.title("📘 FYP RAG Assistant (LLaMA 3)")
 
     index, metadata, embed_model = load_system()
 
-    query = st.text_input("Ask your question:")
+    query = st.chat_input("Ask about FYP handbook...")
 
-    if st.button("Ask") and query:
+    if query:
+        st.session_state.history.append(("user", query))
 
         results = retrieve(query, index, metadata, embed_model)
 
         if results[0]["score"] < SIM_THRESHOLD:
-            st.warning("Not found in handbook.")
-            return
+            answer = "❌ Not found in handbook."
+        else:
+            prompt = build_prompt(query, results)
 
-        prompt = build_prompt(query, results)
+            response = ollama.chat(
+                model="llama3",
+                messages=[{"role": "user", "content": prompt}]
+            )
 
-        # ✅ OLLAMA CALL (instead of transformers)
-        response = ollama.chat(
-            model="llama3",
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
+            answer = response["message"]["content"]
 
-        answer = response["message"]["content"]
+        st.session_state.history.append(("assistant", answer))
 
-        st.subheader("Answer")
-        st.write(answer)
+    # -------------------------------
+    # DISPLAY CHAT
+    # -------------------------------
+    for role, msg in st.session_state.history:
+        if role == "user":
+            st.chat_message("user").write(msg)
+        else:
+            st.chat_message("assistant").write(msg)
 
-        with st.expander("Sources"):
+    # -------------------------------
+    # SOURCES PANEL
+    # -------------------------------
+    if query:
+        with st.expander("📄 Retrieved Context (Debug)"):
             for r in results:
-                st.write(f"Page {r['page']} | Score {r['score']:.3f}")
-                st.write(r["text"][:300])
-                st.write("---")
+                st.markdown(f"**Page {r['page']} | Score {r['score']:.3f}**")
+                st.write(r["text"])
+                st.divider()
 
+# -------------------------------
+# RUN
+# -------------------------------
 if __name__ == "__main__":
     main()
