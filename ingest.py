@@ -82,22 +82,33 @@ def load_pdf(pdf_path):
 # STEP 2: CHUNKING
 # -------------------------------
 def chunk_text(pages):
-    logging.info("Chunking per page (FIXED)...")
+    logging.info("Starting chunking process...")
+
+    # STEP 1: merge all text first
+    full_text = "\n".join([p["text"] for p in pages])
+
+    words = full_text.split()
 
     chunks = []
 
-    for page in pages:
-        words = page["text"].split()
+    for i in range(0, len(words), CHUNK_SIZE - CHUNK_OVERLAP):
+        chunk_words = words[i:i + CHUNK_SIZE]
 
-        for i in range(0, len(words), CHUNK_SIZE - CHUNK_OVERLAP):
-            chunk_words = words[i:i + CHUNK_SIZE]
-
-            chunks.append({
-                "text": " ".join(chunk_words),
-                "page": page["page"]   # 🔥 KEEP REAL PAGE NUMBER
-            })
+        chunks.append({
+            "text": " ".join(chunk_words),
+            "page": "merged"
+        })
 
     logging.info(f"Total chunks created: {len(chunks)}")
+
+    logging.info("Printing ALL chunks...\n")
+
+    for idx, chunk in enumerate(chunks):
+        print("\n" + "=" * 50)
+        print(f"Chunk {idx + 1}")
+        print("=" * 50)
+        print(chunk["text"])
+
     return chunks
 
 # -------------------------------

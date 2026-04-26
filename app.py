@@ -11,14 +11,15 @@ import ollama
 INDEX_FILE = "faiss_index.bin"
 META_FILE = "metadata.pkl"
 EMBED_MODEL = "all-MiniLM-L6-v2"
-TOP_K = 8
-SIM_THRESHOLD = 0.10
+TOP_K = 5
+SIM_THRESHOLD = 0.15
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
 st.set_page_config(
     page_title="FYP Assistant",
+    page_icon="📘",
     layout="wide"
 )
 
@@ -37,7 +38,7 @@ def load_system():
     return index, metadata, embed_model
 
 # -------------------------------
-# RETRIEVAL
+# RETRIEVAL (IMPROVED)
 # -------------------------------
 def retrieve(query, index, metadata, model):
     query_emb = model.encode([query])
@@ -46,44 +47,45 @@ def retrieve(query, index, metadata, model):
     scores, indices = index.search(query_emb, TOP_K)
 
     results = []
-
     for score, idx in zip(scores[0], indices[0]):
         text = metadata[idx]["text"]
 
-        # keyword boost (fix font vs fonts issue)
-        bonus = 0
+        # 🔥 keyword boost (fix for "font" vs "fonts")
+        keyword_bonus = 0
         for word in query.lower().split():
             if word in text.lower():
-                bonus += 0.08
+                keyword_bonus += 0.05
 
         results.append({
-            "score": float(score + bonus),
+            "score": float(score + keyword_bonus),
             "text": text,
             "page": metadata[idx]["page"]
         })
 
-    return sorted(results, key=lambda x: x["score"], reverse=True)
+    # sort after boosting
+    results = sorted(results, key=lambda x: x["score"], reverse=True)
+
+    return results
 
 # -------------------------------
-# PROMPT (FIXED + STRICT)
+# PROMPT (STRONG)
 # -------------------------------
 def build_prompt(question, chunks):
-
     context = "\n\n".join([
         f"(Page {c['page']}) {c['text']}"
         for c in chunks
     ])
 
     return f"""
-You are a STRICT EXAM-GRADE EXTRACTION SYSTEM.
+You are a STRICT FYP handbook assistant.
 
-RULES (MUST FOLLOW):
-1. Extract EXACT values (numbers, limits, formats)
-2. NEVER paraphrase numbers
-3. NEVER say "not mentioned" if any hint exists
-4. If multiple rules exist → list ALL
-5. ALWAYS include page numbers
-6. Output ONLY bullet points
+RULES:
+1. Answer ONLY from the context
+2. DO NOT guess
+3. If information exists → extract EXACT values
+4. ALWAYS include page numbers
+5. If multiple values exist → list clearly
+6. DO NOT say "not mentioned" if it exists
 
 Context:
 {context}
@@ -91,24 +93,20 @@ Context:
 Question:
 {question}
 
-FINAL ANSWER:
+Give a precise, structured answer:
 """
 
 # -------------------------------
-# SESSION STATE
+# CHAT STATE
 # -------------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
-
-results = []  # prevent undefined error
 
 # -------------------------------
 # UI
 # -------------------------------
 def main():
-    global results
-
-    st.title("FYP RAG Assistant (LLaMA 3)")
+    st.title("📘 FYP RAG Assistant (LLaMA 3)")
 
     index, metadata, embed_model = load_system()
 
@@ -120,7 +118,7 @@ def main():
         results = retrieve(query, index, metadata, embed_model)
 
         if results[0]["score"] < SIM_THRESHOLD:
-            answer = "Not found in handbook."
+            answer = "❌ Not found in handbook."
         else:
             prompt = build_prompt(query, results)
 
@@ -134,7 +132,7 @@ def main():
         st.session_state.history.append(("assistant", answer))
 
     # -------------------------------
-    # CHAT DISPLAY
+    # DISPLAY CHAT
     # -------------------------------
     for role, msg in st.session_state.history:
         if role == "user":
@@ -143,10 +141,10 @@ def main():
             st.chat_message("assistant").write(msg)
 
     # -------------------------------
-    # DEBUG PANEL
+    # SOURCES PANEL
     # -------------------------------
-    if query and results:
-        with st.expander("Retrieved Context (Debug)"):
+    if query:
+        with st.expander("📄 Retrieved Context (Debug)"):
             for r in results:
                 st.markdown(f"**Page {r['page']} | Score {r['score']:.3f}**")
                 st.write(r["text"])
