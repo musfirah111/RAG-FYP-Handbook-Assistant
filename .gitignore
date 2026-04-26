@@ -1,0 +1,66 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# -------------------------
+# Virtual Environment
+# -------------------------
+venv/
+env/
+ENV/
+.venv/
+
+# -------------------------
+# Jupyter (if you used .ipynb)
+# -------------------------
+.ipynb_checkpoints/
+
+# -------------------------
+# Streamlit
+# -------------------------
+.streamlit/
+
+# -------------------------
+# FAISS / Vector DB files (IMPORTANT)
+# These are generated during ingestion
+# -------------------------
+faiss_index.bin
+*.index
+
+# -------------------------
+# Pickle / metadata files (generated artifacts)
+# -------------------------
+metadata.pkl
+*.pkl
+
+# -------------------------
+# Logs / runtime files
+# -------------------------
+*.log
+
+# -------------------------
+# OS files
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------
+# Environment variables (if you use API keys later)
+# -------------------------
+.env
+
+# -------------------------
+# IDEs
+# -------------------------
+.vscode/
+.idea/
+
+# -------------------------
+# Large model cache (HuggingFace / Transformers)
+# -------------------------
+.cache/
+huggingface/
