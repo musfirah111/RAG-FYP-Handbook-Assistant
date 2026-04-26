@@ -14,8 +14,12 @@ import numpy as np
 import logging
 from dotenv import load_dotenv
 from huggingface_hub import login
+import pytesseract
+from pdf2image import convert_from_path
+from PIL import Image
 
 load_dotenv()
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 hf_token = os.getenv("HUGGING_FACE_TOKEN")
 print("Token loaded: ", hf_token is not None)
@@ -44,13 +48,24 @@ logging.basicConfig(
 # STEP 1: LOAD PDF
 # -------------------------------
 def load_pdf(pdf_path):
-    logging.info("Loading PDF...")
+    logging.info("Loading PDF with OCR fallback...")
+
+    pages = []
+
+    # Convert PDF to images.
+    pdf_images = convert_from_path(pdf_path, dpi=300)
 
     reader = PdfReader(pdf_path)
-    pages = []
 
     for i, page in enumerate(reader.pages):
         text = page.extract_text()
+
+        # If text is weak, use OCR.
+        if not text or len(text.strip()) < 100:
+            # logging.info(f"Page {i+1} using OCR...")
+
+            image = pdf_images[i]
+            text = pytesseract.image_to_string(image, config="--oem 3 --psm 6")
 
         if text:
             pages.append({
@@ -58,7 +73,7 @@ def load_pdf(pdf_path):
                 "text": text
             })
 
-            logging.info(f"Loaded page {i + 1} | chars: {len(text)}")
+            logging.info(f"Loaded page {i+1} | chars: {len(text)}")
 
     logging.info(f"Total pages loaded: {len(pages)}")
     return pages
@@ -86,8 +101,13 @@ def chunk_text(pages):
 
     logging.info(f"Total chunks created: {len(chunks)}")
 
-    logging.info("Sample chunk preview:")
-    logging.info(chunks[0]["text"][:300])
+    logging.info("Printing ALL chunks...\n")
+
+    for idx, chunk in enumerate(chunks):
+        print("\n" + "=" * 50)
+        print(f"Chunk {idx + 1}")
+        print("=" * 50)
+        print(chunk["text"])
 
     return chunks
 
